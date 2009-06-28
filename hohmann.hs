@@ -13,8 +13,16 @@ import System.Environment (getArgs)
 main = do
   args <- getArgs
   let cfg = read $ args !! 0
-  let vm = initialVM initData initCode cfg
-  hohmann vm
+      vm = initialVM initData initCode cfg
+      h0 = hinit (vmRun vm)
+      source = hradius h0
+      target = htarget h0
+      dv = sqrt(mu/source) * (sqrt(2*target/(source+target))-1)
+  hdump h0
+  log <- hohmann h0 $ dv
+  case log of
+    Just sbf -> encodeFile ("log" ++ (show cfg) ++ ".sbf") $ sbf
+    Nothing -> putStrLn "Orbit miss"
 
 vl x y = sqrt ((x*x) + (y*y))
 measure n = fromJust . lookup n . outPort
@@ -22,7 +30,7 @@ hscore = measure 0 . vm0
 hfuel = measure 1 . vm0
 hsx = measure 2 . vm0
 hsy = measure 3 . vm0
-hto = measure 4 . vm0
+htarget = measure 4 . vm0
 
 hradius vm = vl (hsx vm) (hsy vm)
 
@@ -37,7 +45,7 @@ closeEnoughTo d = (< 1000) . abs . (d-)
 
 simUntil f h = rec 0 h
     where rec n h | f h       = return h
-                  | n == 0    = hdump h >> rec 250 h
+                  | n == 0    = hdump h >> rec 5000 h
                   | otherwise = rec (pred n) $ hnext h 0 0
 
 simCorrectUntil d c f h = rec 0 h
@@ -79,37 +87,49 @@ hstep s i = Hohmann s s' vx vy dr i
           vy = y1 - y0
           dr = (vl x1 y1) - (vl x0 y0)
 
-hohmann vm = do
-  let h0 = hinit (vmRun vm)
-      sx0 = hsx h0
-      sy0 = hsy h0
-      source = hradius h0
-      target = hto h0
-      passed = if target > source then (<= 0) . dr else (>= 0) . dr
-      vx0 = vx h0
-      vy0 = vy h0
-      v0 = vl vx0 vy0
-  hdump h0
-  let dv1 = sqrt(mu/source) * (sqrt(2*target/(source+target))-1)
-      dvx1 = dv1 * vx0 / v0
-      dvy1 = dv1 * vy0 / v0
+hohmann h dv1 = do
+  let source = hradius h
+      target = htarget h
   printf "Target orbit %g, sending burst (dv=%g)\n" target dv1
-  let h1 = hnext h0 dvx1 dvy1
-  h2 <- simUntil passed h1
+  let vx1 = (vx h)
+      vy1 = (vy h)
+      v1 = vl vx1 vy1
+      dvx1 = dv1 * vx1 / v1
+      dvy1 = dv1 * vy1 / v1
+      h1 = hnext h dvx1 dvy1
+  h2 <- simUntil (endOfBallistic source target) h1
   hdump h2
-  let target' = hradius h2
-      vt = sqrt(mu/target')
+  if (hradius h2) `closeEnoughTo` target
+    then hohmann2 h2
+    else return Nothing
+
+endOfBallistic source target h = hradius h `op` target || 0 `op` dr h
+    where op = if target > source 
+               then (>=)
+               else (<=)
+
+hohmann2 h2 = do
+  let x2 = (hsx h2)
+      y2 = (hsy h2)
+      r2 = vl x2 y2
+      vt = sqrt(mu/r2)
       vx2 = vx h2
       vy2 = vy h2
-      v2 = vl vx2 vy2
-      dvx2 = vt * vx2 / v2 - vx2
-      dvy2 = vt * vy2 / v2 - vy2
+      delta = signum (x2*vy2 - y2*vx2)
+      vx2' = delta * y2 * vt / r2
+      vy2' = -delta * x2 * vt / r2
+      dvx2 = vx2' - vx2
+      dvy2 = vy2' - vy2
+      c = clock . vm0 $ h2
   printf "Target orbit reached, sending burst (dv=%g)\n" (vl dvx2 dvy2)
   let h3 = hnext h2 dvx2 dvy2
-  h4 <- simUntil ((/= 0) . hscore) h3
+  h4 <- simUntil (done $ c+1000) h3
   hdump h4
-  putStrLn "Dumping log to log.sbf"
-  encodeFile "log.sbf" $ finalLog . vm0 $ h4
+  if hscore h4 > 0
+    then return . Just $ finalLog . vm0 $ h4
+    else return Nothing
+
+done c h = hscore h /= 0 || clock(vm0 h) >= c
 
 g = 6.67428e-11
 me = 6e24
