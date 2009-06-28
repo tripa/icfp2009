@@ -32,6 +32,7 @@ data VMState = VMState {
     , previousIn :: PortMapping
     , clock :: TimeStamp
     , inputLog :: [LogFrame]
+    , config :: Word32
     }
 
 peek :: VMState -> Address -> DataWord
@@ -165,13 +166,13 @@ decodeOBF = OBF `liftM` rec decodeEvenFrame decodeOddFrame
 decodeBinaryFile :: FilePath -> IO OBF
 decodeBinaryFile file = decodeFile ("/home/tripa/work/icfp2009/" ++ file)
 
-newtype SBF = SBF [LogFrame]
+newtype SBF = SBF (Word32, [LogFrame])
 instance Binary SBF where
     get = undefined
-    put (SBF fs) = do
+    put (SBF (cfg,fs)) = do
       putWord32le 0xCAFEBABE
       putWord32le 723
-      putWord32le 1001
+      putWord32le cfg
       forM_ fs $ \(c, pm) -> do
                       putWord32le c
                       putWord32le (genericLength pm)
@@ -179,18 +180,20 @@ instance Binary SBF where
                                putWord32le . fromIntegral $ a
                                putFloat64le v
 
-initialVM :: OBF -> VMState
-initialVM (OBF fs) = VMState
-                     m
-                     undefined -- should be defined by vmRun
-                     False
-                     (accumArray (curry snd) 0 (0,m) $ zip [0..] dataStream)
-                     (accumArray (curry snd) id (0,m) $ zip [0..] $ map eval $ instrStream)
-                     undefined -- should be defined by caller
-                     undefined -- should be defined by vmRun
-                     []
-                     0
-                     []
+initialVM :: OBF -> Word16 -> VMState
+initialVM (OBF fs) cfg =
+      VMState
+      m
+      undefined -- should be defined by vmRun
+      False
+      (accumArray (curry snd) 0 (0,m) $ zip [0..] dataStream)
+      (accumArray (curry snd) id (0,m) $ zip [0..] $ map eval $ instrStream)
+      [(0x3E80, fromIntegral cfg)]
+      undefined -- should be defined by vmRun
+      []
+      0
+      []
+      (fromIntegral cfg)
     where (dataStream, instrStream) = unzip fs
           m = pred . genericLength $ fs
 
@@ -222,7 +225,7 @@ diffPorts c l p p' = if numChanges > 0 then (c,portChange):l else l
           portChange = newPorts ++ oldPorts
           numChanges = length portChange
 
-finalLog s = reverse $ (clock s, []) : (inputLog s)
+finalLog s = SBF (config s, reverse $ (clock s, []) : (inputLog s))
 
 eval :: InstrWord -> VMState -> VMState
 eval i = case decode i of
@@ -286,9 +289,10 @@ dumpOBF (OBF fs) = rec 0 fs
 
 main = do
   args <- getArgs
-  let filename = head $ args
+  let filename = args !! 0
+      cfg = read $ args !! 1
   obf <- decodeBinaryFile filename
-  let vm = (initialVM obf) { inPort = [(0x3E80, 1001)] }
+  let vm = initialVM obf cfg
   hohmann vm
 
 vl x y = sqrt ((x*x) + (y*y))
@@ -386,7 +390,7 @@ hohmann vm = do
   h4 <- simUntil ((/= 0) . hscore) h3
   hdump h4
   putStrLn "Dumping log to log.sbf"
-  encodeFile "log.sbf" $ SBF $ finalLog . vm0 $ h4
+  encodeFile "log.sbf" $ finalLog . vm0 $ h4
 
 g = 6.67428e-11
 me = 6e24
