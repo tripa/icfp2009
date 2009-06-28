@@ -1,18 +1,8 @@
 module Orbit where
 
-import Control.Monad
-import Control.Monad.Trans
-import Data.Int
 import Data.Word (Word16, Word32)
-import Data.Array.Unboxed
-import Data.Bits
-import Data.List ((\\), genericLength)
-import Data.Binary hiding (decode)
-import Data.Binary.Get
-import Data.Binary.Put
-import Data.Binary.IEEE754
-import qualified Data.ByteString.Lazy as B
-import Text.Printf (printf)
+import Data.Array.Unboxed (UArray)
+import Data.List ((\\))
 
 type Address = Word16 -- only 14 used
 type DataWord = Double
@@ -28,28 +18,10 @@ data VMState = VMState {
     , inPort :: PortMapping
     , outPort :: PortMapping
     , previousIn :: PortMapping
-    , clock :: TimeStamp
-    , inputLog :: [LogFrame]
-    , config :: Word32
+    , vmClock :: TimeStamp
+    , vmInputLog :: [LogFrame]
+    , vmConfig :: Word32
     }
-
--- peek :: VMState -> Address -> DataWord
--- peek s a | a <= maxAddr s = dataMem s ! a
---          | otherwise      = 0
-
-newtype SBF = SBF (Word32, [LogFrame])
-instance Binary SBF where
-    get = undefined
-    put (SBF (cfg,fs)) = do
-      putWord32le 0xCAFEBABE
-      putWord32le 723
-      putWord32le cfg
-      forM_ fs $ \(c, pm) -> do
-                      putWord32le c
-                      putWord32le (genericLength pm)
-                      forM_ pm $ \(a, v) -> do
-                               putWord32le . fromIntegral $ a
-                               putFloat64le v
 
 initialVM :: DataMem -> CodeMem -> Word16 -> VMState
 initialVM d c cfg =
@@ -63,26 +35,18 @@ initialVM d c cfg =
       []
       (fromIntegral cfg)
 
--- vmStep :: VMState -> VMState
--- vmStep s = ((currentCode s) s) { current = succ . current $ s }
-
--- currentCode :: VMState -> VMState -> VMState
--- currentCode s | a <= maxAddr s = (instrMem s) ! a
---               | otherwise      = error $ "Tried to read code " ++ show a
---     where a = current s
-
 vmRun :: VMState -> VMState
 vmRun s = l' `seq`
           s { dataMem = d'
             , outPort = o
             , previousIn = i'
-            , clock = succ c
-            , inputLog = l'
+            , vmClock = succ c
+            , vmInputLog = l'
             }
     where (d', o) = codeMem s $ (dataMem s, i')
           i' = inPort s
-          c = clock s
-          l' = diffPorts c (inputLog s) (previousIn s) i' 
+          c = vmClock s
+          l' = diffPorts c (vmInputLog s) (previousIn s) i' 
 
 diffPorts c l p p' = if numChanges > 0 then (c,portChange):l else l
     where newPorts = p' \\ p
@@ -90,7 +54,20 @@ diffPorts c l p p' = if numChanges > 0 then (c,portChange):l else l
           portChange = newPorts ++ oldPorts
           numChanges = length portChange
 
-finalLog s = SBF (config s, reverse $ (clock s, []) : (inputLog s))
+----------------------------------------------------------------------
+-- All the stuff below is obsolete: it's the formerly used          --
+-- evaluating model of the VM.  Now it's compiled directly          --
+-- from Haskell, it's MUCH faster that way.                         --
+----------------------------------------------------------------------
+
+-- peek :: VMState -> Address -> DataWord
+-- peek s a | a <= maxAddr s = dataMem s ! a
+--          | otherwise      = 0
+
+-- currentCode :: VMState -> VMState -> VMState
+-- currentCode s | a <= maxAddr s = (instrMem s) ! a
+--               | otherwise      = error $ "Tried to read code " ++ show a
+--     where a = current s
 
 -- eval :: InstrWord -> VMState -> VMState
 -- eval i = case decode i of
@@ -140,3 +117,6 @@ finalLog s = SBF (config s, reverse $ (clock s, []) : (inputLog s))
 
 -- unary :: (DataWord -> DataWord) -> Address -> VMState -> VMState
 -- unary op r s = updateMem s $ op (peek s r)
+
+-- vmStep :: VMState -> VMState
+-- vmStep s = ((currentCode s) s) { current = succ . current $ s }

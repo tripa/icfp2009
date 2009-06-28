@@ -2,6 +2,7 @@ module Main where
 
 import Orbit
 import Bin1
+import SBF (finalLog)
 
 import Data.List (sortBy)
 import Data.Maybe (fromJust, isNothing)
@@ -57,7 +58,7 @@ hdump h = printf "F=%5.2g R=%.6e V=%5.2f S=%g T=%d\n"
                  (hradius h)
                  (vl (vx h) (vy h))
                  (hscore h)
-                 (clock . vm0 $ h)
+                 (vmClock . vm0 $ h)
 
 closeEnoughTo d = (< 1000) . abs . (d-)
 
@@ -140,7 +141,7 @@ stabilizeHohmann h2 = do
   let r2 = hradius h2
       vt = sqrt(mu/r2)
       (dvx, dvy) = adjustSpeed (-vt) (hpos h2) (hspeed h2)
-      c = clock . vm0 $ h2
+      c = vmClock . vm0 $ h2
   printf "Target orbit reached, sending burst (dv=%g)\n" (vl dvx dvy)
   let h3 = hnext h2 dvx dvy
   h4 <- simUntil (done $ c+1000) h3
@@ -149,7 +150,7 @@ stabilizeHohmann h2 = do
     then return . Just $ h4
     else return Nothing
 
-done c h = hscore h /= 0 || clock(vm0 h) >= c
+done c h = hscore h /= 0 || vmClock(vm0 h) >= c
 
 g = 6.67428e-11
 me = 6e24
