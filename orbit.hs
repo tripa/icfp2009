@@ -6,6 +6,7 @@ import Data.Array.Unboxed
 import Data.Bits
 import Data.List
 import Data.Maybe
+import Data.Function
 import Data.Binary hiding (decode)
 import Data.Binary.Get
 import Data.Binary.Put
@@ -368,13 +369,11 @@ hohmann vm = do
       vx0 = vx h0
       vy0 = vy h0
       v0 = vl vx0 vy0
-  printf "s(%g,%g) T=%g\n" sx0 sy0 target
   hdump h0
-  printf "v(%g,%g) V=%g\n" vx0 vy0 v0
   let dv1 = sqrt(mu/source) * (sqrt(2*target/(source+target))-1)
       dvx1 = dv1 * vx0 / v0
       dvy1 = dv1 * vy0 / v0
-  printf "Sending burst (dv=%g)\n" dv1
+  printf "Target orbit %g, sending burst (dv=%g)\n" target dv1
   let h1 = hnext h0 dvx1 dvy1
   h2 <- simUntil passed h1
   hdump h2
@@ -385,7 +384,7 @@ hohmann vm = do
       v2 = vl vx2 vy2
       dvx2 = vt * vx2 / v2 - vx2
       dvy2 = vt * vy2 / v2 - vy2
-  printf "Reached target orbit, burst (dv=%g)\n" (vl dvx2 dvy2)
+  printf "Target orbit reached, sending burst (dv=%g)\n" (vl dvx2 dvy2)
   let h3 = hnext h2 dvx2 dvy2
   h4 <- simUntil ((/= 0) . hscore) h3
   hdump h4
@@ -395,3 +394,20 @@ hohmann vm = do
 g = 6.67428e-11
 me = 6e24
 mu = g*me
+
+-- I'm too tired to solve 2-vars quadratics in O(1)
+circleInter (x, y) d r = bisect (eval a) a b
+    where [a,b] = take 2 $
+                  sortBy (compare `on` eval)
+                         [(d,0),(-d,0),(0,d),(0,d)]
+          eval (dx,dy) = abs(vl (x+dx) (y+dy) - r)
+          combine (x1,y1) (x2,y2) = (x'*d/n,y'*d/n)
+              where x' = x1+x2
+                    y' = y1+y2
+                    n = vl x' y' -- this could be 0! BUG
+          bisect ea a b | ec < 1000 = c
+                        | ec < ea   = bisect ec c a
+                        | otherwise = bisect ea a c
+              where ec = eval c
+                    c = combine a b
+
