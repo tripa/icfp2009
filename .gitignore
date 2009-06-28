@@ -1,2 +1,8 @@
 *~
 *.sbf
+Bin?.hs
+*.o
+*.hi
+*.aux
+*.hp
+*.ps

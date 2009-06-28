@@ -1,0 +1,40 @@
+-- -*- Haskell -*-
+
+module [% module %] where
+
+import Orbit
+import Data.Array.Unboxed
+
+initData :: DataMem
+initData = array (0, [% state.size - 1 %]) $
+[% FOREACH addr IN state.keys -%]
+                 ([% state.$addr %], [% data.${state.$addr} %]) :
+[% END -%]
+                 []
+
+initCode :: CodeMem
+initCode (old, input) = (new, output)
+    where
+[% FOREACH old IN state.keys -%]
+      o[% old %] = old ! [% state.$old %]
+[% END -%]
+
+[% FOREACH port IN input.keys -%]
+      input[% port %] = maybe 0 id . lookup [% port %] $ input
+[% END -%]
+
+[% FOREACH var IN assign.keys -%]
+      [% var %] = [% assign.$var %]
+[% END -%]
+
+      new = old // (
+[% FOREACH new IN state.keys -%]
+                     ([% state.$new %], n[% new %]):
+[% END -%]
+                     [] )
+
+      output =
+[% FOREACH port IN output.keys -%]
+        ([% port %], [% output.$port %]) :
+[% END -%]
+        []
