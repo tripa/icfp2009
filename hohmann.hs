@@ -4,8 +4,9 @@ import Orbit
 import Bin1
 
 import Data.List (sortBy)
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, isNothing)
 import Data.Function (on)
+import Control.Monad (liftM)
 import Data.Binary (encodeFile)
 import Text.Printf (printf)
 import System.Environment (getArgs)
@@ -15,14 +16,31 @@ main = do
   let cfg = read $ args !! 0
       vm = initialVM initData initCode cfg
       h0 = hinit (vmRun vm)
-      source = hradius h0
-      target = htarget h0
-      dv = sqrt(mu/source) * (sqrt(2*target/(source+target))-1)
   hdump h0
-  log <- hohmann h0 $ dv
-  case log of
-    Just sbf -> encodeFile ("log" ++ (show cfg) ++ ".sbf") $ sbf
-    Nothing -> putStrLn "Orbit miss"
+  hf <- fromJust `liftM` startHohmann h0
+  let rf = hfuel hf
+  printf "Remaining fuel: %g\n" rf
+  hf' <- bsearch hscore (wastingHohmann h0) (hscore hf) 0 rf
+  encodeFile ("log" ++ (show cfg) ++ ".sbf") $ finalLog . vm0 $ hf'
+
+wastingHohmann :: Hohmann -> Double -> IO (Maybe Hohmann)
+wastingHohmann h0 w = do
+  let (dvx, dvy) = adjustSpeed (w + hohmannSpeed h0) (hpos h0) (hspeed h0)
+      h1 = hnext h0 dvx dvy
+  startHohmann h1
+
+bsearch ev f best good bad = do
+  let value = (good+bad) / 2
+  result <- f value
+  let tested = fromJust result
+      worth  = ev tested
+  bsearch' ev f best good bad value result tested worth
+
+bsearch' ev f best good bad value result tested worth
+    | isNothing result         = bsearch ev f best good value
+    | worth < best             = bsearch ev f best good value
+    | abs(worth - best) < 1e-6 = return tested
+    | otherwise                = bsearch ev f worth value bad
 
 vl x y = sqrt ((x*x) + (y*y))
 measure n = fromJust . lookup n . outPort
@@ -87,20 +105,30 @@ hstep s i = Hohmann s s' vx vy dr i
           vy = y1 - y0
           dr = (vl x1 y1) - (vl x0 y0)
 
-hohmann h dv1 = do
-  let source = hradius h
-      target = htarget h
-  printf "Target orbit %g, sending burst (dv=%g)\n" target dv1
-  let vx1 = (vx h)
-      vy1 = (vy h)
-      v1 = vl vx1 vy1
-      dvx1 = dv1 * vx1 / v1
-      dvy1 = dv1 * vy1 / v1
-      h1 = hnext h dvx1 dvy1
-  h2 <- simUntil (endOfBallistic source target) h1
+adjustSpeed v (x, y) (vx, vy) = (vx' - vx, vy' - vy)
+    where delta = -signum (x*vy - y*vx)
+          vx' =  delta * y * v / r
+          vy' = -delta * x * v / r
+          r = vl x y
+
+hpos h = (hsx h, hsy h)
+hspeed h = (vx h, vy h)
+
+hohmannSpeed h = sqrt((2*mu*r2)/(r1*(r1+r2)))
+    where r1 = hradius h
+          r2 = htarget h
+
+startHohmann h0 = do
+  let v = hohmannSpeed h0
+      r1 = hradius h0
+      r2 = htarget h0
+      (dvx, dvy) = adjustSpeed v (hpos h0) (hspeed h0)
+  printf "Target orbit %g, sending burst (dv=%g)\n" r2 (vl dvx dvy)
+  let h1 = hnext h0 dvx dvy
+  h2 <- simUntil (endOfBallistic r1 r2) h1
   hdump h2
-  if (hradius h2) `closeEnoughTo` target
-    then hohmann2 h2
+  if (hradius h2) `closeEnoughTo` r2
+    then stabilizeHohmann h2
     else return Nothing
 
 endOfBallistic source target h = hradius h `op` target || 0 `op` dr h
@@ -108,25 +136,17 @@ endOfBallistic source target h = hradius h `op` target || 0 `op` dr h
                then (>=)
                else (<=)
 
-hohmann2 h2 = do
-  let x2 = (hsx h2)
-      y2 = (hsy h2)
-      r2 = vl x2 y2
+stabilizeHohmann h2 = do
+  let r2 = hradius h2
       vt = sqrt(mu/r2)
-      vx2 = vx h2
-      vy2 = vy h2
-      delta = signum (x2*vy2 - y2*vx2)
-      vx2' = delta * y2 * vt / r2
-      vy2' = -delta * x2 * vt / r2
-      dvx2 = vx2' - vx2
-      dvy2 = vy2' - vy2
+      (dvx, dvy) = adjustSpeed (-vt) (hpos h2) (hspeed h2)
       c = clock . vm0 $ h2
-  printf "Target orbit reached, sending burst (dv=%g)\n" (vl dvx2 dvy2)
-  let h3 = hnext h2 dvx2 dvy2
+  printf "Target orbit reached, sending burst (dv=%g)\n" (vl dvx dvy)
+  let h3 = hnext h2 dvx dvy
   h4 <- simUntil (done $ c+1000) h3
   hdump h4
   if hscore h4 > 0
-    then return . Just $ finalLog . vm0 $ h4
+    then return . Just $ h4
     else return Nothing
 
 done c h = hscore h /= 0 || clock(vm0 h) >= c
