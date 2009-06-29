@@ -1,6 +1,6 @@
 module Main where
 
-import Orbit
+import Orbit hiding (vm0, vm1, defaultIn)
 import Bin1
 import SBF (finalLog)
 
@@ -151,10 +151,6 @@ stabilizeHohmann h2 = do
     else return Nothing
 
 done c h = hscore h /= 0 || vmClock(vm0 h) >= c
-
-g = 6.67428e-11
-me = 6e24
-mu = g*me
 
 -- I'm too tired to solve 2-vars quadratics in O(1)
 circleInter (x, y) d r = bisect (eval a) a b

@@ -1,8 +1,11 @@
 module Orbit where
 
 import Data.Word (Word16, Word32)
+import Data.Maybe (fromJust)
 import Data.Array.Unboxed (UArray)
 import Data.List ((\\))
+
+import Text.Printf (printf)
 
 type Address = Word16 -- only 14 used
 type DataWord = Double
@@ -53,6 +56,59 @@ diffPorts c l p p' = if numChanges > 0 then (c,portChange):l else l
           oldPorts = zip ((map fst p) \\ (map fst p')) (repeat 0)
           portChange = newPorts ++ oldPorts
           numChanges = length portChange
+
+sOutput s n = fromJust . lookup n . outPort $ s
+
+data VM = VM { vm0 :: VMState
+             , vmX :: DataWord
+             , vmY :: DataWord
+             , vmR :: DataWord
+             , vm1 :: VMState
+             , vmVx :: DataWord
+             , vmVy :: DataWord
+             , vmV :: DataWord
+             , defaultIn :: PortMapping }
+
+vmInit :: VMState -> VM
+vmInit s = vmStep (vmRun s) (inPort s)
+
+vmStep :: VMState -> PortMapping -> VM
+vmStep s p = VM s x y r s' vx vy v p
+    where x = sOutput s 2
+          y = sOutput s 3
+          r = vectorLength (x,y)
+          s' = vmRun s { inPort = p }
+          vx = sOutput s' 2 - x
+          vy = sOutput s' 3 - y
+          v = vectorLength (vx,vy)
+
+vmCoast v = vmStep (vm1 v) (defaultIn v)
+
+vmThrust v ( 0 , 0 ) = vmCoast v
+vmThrust v (dvx,dvy) = vmStep (vmRun ((vm0 v) { inPort = (2,-dvx):(3,-dvy):i }))
+                              i
+    where i = defaultIn v
+
+vmDump v = printf "%.4g(%.4g) %.4g(%.4g) %g %g"
+                  (vmX v) (vmVx v)
+                  (vmY v) (vmVy v)
+                  (vmFuel v) (vmScore v)
+
+vmOutput = sOutput . vm0
+
+vmFuel v = vmOutput v 1
+vmScore v = vmOutput v 0
+
+vmPos v = (vmX v, vmY v)
+vmSpeed v = (vmVx v, vmVy v)
+
+-- Physics
+
+vectorLength (x,y) = sqrt (x*x + y*y)
+
+g = 6.67428e-11
+me = 6e24
+mu = g*me
 
 ----------------------------------------------------------------------
 -- All the stuff below is obsolete: it's the formerly used          --
