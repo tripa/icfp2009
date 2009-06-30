@@ -1,4 +1,6 @@
 -- -*- Haskell -*-
+-- THIS FILE IS GENERATED FROM optimizer.tt
+-- DO NOT MODIFY
 
 module [% module %] where
 
