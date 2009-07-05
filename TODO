@@ -1,0 +1,10 @@
+-*- Org -*-
+
+* Orbit
+** namespace cleanup between VM and VMState
+** ability to switch programs
+* Visualizer
+** ability to handle problems 2, 3, 4, 5 too
+** pause
+** forward, backward
+** trajectory and bursts tracks
