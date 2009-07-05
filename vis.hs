@@ -18,13 +18,17 @@ data Player = Player {
     , input :: [LogFrame]
     }
 
+data GUI = GUI { guiDisplay :: DrawingArea
+               , guiTime :: Entry
+               , guiFuel :: Entry }
+
 playerInit = do
   (filename:_) <- getArgs
   (SBF (cfg, pm)) <- decodeFile filename :: IO SBF
   newIORef (Player (initialVM initData initCode (fromIntegral cfg)) pm)
 
-exposeCb da s e = do
-  dw <- widgetGetDrawWindow da
+exposeCb gui s _ = do
+  dw <- widgetGetDrawWindow . guiDisplay $ gui
   vm <- vm `liftM` readIORef s
 
   let x = -sOutput vm 2
@@ -52,6 +56,9 @@ exposeCb da s e = do
     setSourceRGB 0.0 0.75 0.0
     stroke
 
+  entrySetText (guiTime gui) . show $ vmClock vm
+  entrySetText (guiFuel gui) . show $ sOutput vm 1
+
   return True
 
 tick (Player vm []) = Player (vmRun vm) []
@@ -70,19 +77,36 @@ main = do
   initGUI 
 
   window <- windowNew
-  onDestroy window mainQuit
   set window [ windowTitle := "Orbit" ]
+  v <- vBoxNew False 0
+  containerAdd window v
 
   da <- drawingAreaNew
   widgetSetSizeRequest da 500 500
-  onExpose da $ exposeCb da s
-  containerAdd window da
+  containerAdd v da
+
+  h <- hBoxNew False 0
+  containerAdd v h
+  labelNew (Just "T:") >>= containerAdd h
+  time <- entryNew
+  set time [ entryAlignment := 1, entryEditable := False ]
+  containerAdd h time
+  labelNew (Just "F:") >>= containerAdd h
+  fuel <- entryNew
+  set fuel [ entryEditable := False ]
+  containerAdd h fuel
+
+  let gui = GUI da time fuel
 
   p <- idleAdd (step s da) priorityDefaultIdle
   step s da -- iterate at least once so output ports are defined
 
+  onDestroy window mainQuit
+  onExpose da $ exposeCb gui s
   widgetShowAll window
+
   mainGUI
+
   idleRemove p
   widgetDestroy da
   widgetDestroy window
